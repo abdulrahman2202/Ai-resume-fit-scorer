@@ -24,7 +24,7 @@ The **Resume Fit Scorer** evaluates candidate suitability against job openings t
 - **Job Description Processing**: Automated extraction of structured hiring criteria from raw, unstructured job description text.
 - **Gemini-Powered Requirement Extraction**: Extracts explicit hiring criteria using Google Gemini without delegating scoring or decision-making to the LLM.
 - **Structured Requirement Categories**: Categorizes criteria into five distinct domains: Technical Skills, Experience, Education, Responsibilities, and Tools.
-- **Semantic Matching with all-MiniLM-L6-v2**: Chunk-level dense vector semantic similarity scoring normalized to $[0.0, 1.0]$.
+- **Semantic Matching with all-MiniLM-L6-v2**: Chunk-level dense vector semantic similarity scoring normalized to [0.0, 1.0].
 - **Deterministic Keyword Matching**: Case-insensitive, whitespace-tolerant keyword matching using regex word boundaries.
 - **Evidence Extraction**: Automatically extracts the strongest matching resume text chunk for each criterion.
 - **Deterministic Scoring**: Completely reproducible Python-based scoring engine operating on explicit mathematical formulas.
@@ -125,7 +125,7 @@ The requirement extraction service (`app/services/criterion_extractor.py`) uses 
 - **JSON and Pydantic Validation**: The model is instructed to output JSON conforming strictly to the schema. Output is parsed, stripped of markdown wrappers, validated against `CriterionExtractionResponse`, deduplicated, and keyword-normalized.
 - **Transient Error Retry with Exponential Backoff**:
   - Transient HTTP errors (`429`, `500`, `502`, `503`, `504`), connection drops, and read/connect timeouts are automatically retried.
-  - Retries follow exponential backoff: Attempt 1 ($\approx 1\text{s}$), Attempt 2 ($\approx 2\text{s}$), Attempt 3 ($\approx 4\text{s}$), capped at `max_retry_delay_seconds: 8`.
+  - Retries follow exponential backoff: Attempt 1 (~1s), Attempt 2 (~2s), Attempt 3 (~4s), capped at `max_retry_delay_seconds: 8`.
   - Permanent errors (`400 Bad Request`, `401/403 Auth Errors`, `404 Not Found`, schema validation failures) fail immediately without retrying.
 - **No Tools or Automatic Function Calling (AFC)**: Requests explicitly set `tools=None` and `automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)`. This ensures clean, direct text generation without AFC execution loops or warning messages.
 
@@ -145,12 +145,19 @@ Extracted Criterion
 - **Paragraph-Aware Chunking**: Resumes are segmented into overlapping text blocks (`chunk_size: 500`, `chunk_overlap: 50` characters) preserving paragraph boundaries.
 - **Embedding Generation**: Uses `all-MiniLM-L6-v2` via `sentence-transformers`, loaded once in memory by `EmbeddingModelManager`.
 - **Cosine Similarity**: Vector cosine similarity is calculated between the criterion embedding (description + keywords) and each resume chunk embedding.
-- **Score Normalization**: Clamps raw cosine similarity to $[0.0, 1.0]$ via $\max(0.0, \min(1.0, \text{cosine\_similarity}))$ to eliminate negative noise without distorting positive alignments.
+- **Score Normalization**: Clamps raw cosine similarity to [0.0, 1.0] to eliminate negative noise without distorting positive alignments:
+
+$$
+\mathrm{normalized\_score} = \max(0.0, \min(1.0, \mathrm{cosine\_similarity}))
+$$
 
 ### Keyword Evidence
 - **Deterministic Regex Matching**: Evaluates criterion keywords against resume text using case-insensitive, whitespace-tolerant regular expressions with `\b` word boundaries.
 - **Keyword Score**: Calculated as the exact fraction of keywords found:
-  $$\text{keyword\_score} = \frac{|\text{matched keywords}|}{|\text{total criterion keywords}|}$$
+
+$$
+\mathrm{keyword\_score} = \frac{\mathrm{matched\_keywords}}{\mathrm{total\_criterion\_keywords}}
+$$
 
 ### Evidence Extraction
 For every criterion, the engine records:
@@ -168,9 +175,11 @@ All scoring is strictly deterministic and calculated in Python.
 
 For each individual criterion, the score combines semantic similarity and keyword evidence according to configured weights (`config.yaml`):
 
-$$\text{criterion\_score} = \left( 0.60 \times \text{semantic\_score} + 0.40 \times \text{keyword\_score} \right) \times 100.0$$
+$$
+\mathrm{criterion\_score} = \left( 0.60 \times \mathrm{semantic\_score} + 0.40 \times \mathrm{keyword\_score} \right) \times 100.0
+$$
 
-The resulting criterion score is bounded in $[0.0, 100.0]$.
+The resulting criterion score is bounded in `[0.0, 100.0]`.
 
 ### 2. Category Weights
 
@@ -186,24 +195,30 @@ Criteria are grouped by category and weighted according to configured values:
 
 Within each category present in the job description, the category score is the arithmetic mean of its criteria:
 
-$$\text{category\_score}(c) = \frac{1}{|K_c|} \sum_{i \in K_c} \text{criterion\_score}(i)$$
+$$
+\mathrm{category\_score}(c) = \frac{1}{|K_c|} \sum_{i \in K_c} \mathrm{criterion\_score}(i)
+$$
 
 ### 3. Missing-Category Renormalization
 
 If a job description lacks criteria for one or more categories (e.g., no explicit education or tool requirements), the weights of only the **present** categories are renormalized proportionally:
 
-$$w'_c = \frac{w_c}{\sum_{k \in \text{present}} w_k}$$
+$$
+w'_c = \frac{w_c}{\sum_{k \in \mathrm{present}} w_k}
+$$
 
 The overall score is computed as:
 
-$$\text{overall\_score} = \sum_{c \in \text{present}} w'_c \times \text{category\_score}(c) \in [0.0, 100.0]$$
+$$
+\mathrm{overall\_score} = \sum_{c \in \mathrm{present}} w'_c \times \mathrm{category\_score}(c)
+$$
 
-This ensures missing categories never penalize candidates or distort the 0.0–100.0 scale.
+This ensures missing categories never penalize candidates or distort the `0.0` to `100.0` scale.
 
 ### 4. Deterministic Reasoning
 
 For each criterion, the engine produces an explainable, fact-based summary referencing:
-- **Semantic Tier**: Strong ($\ge 0.75$), Moderate ($\ge 0.50$), or Weak ($< 0.50$).
+- **Semantic Tier**: Strong (>= 0.75), Moderate (>= 0.50), or Weak (< 0.50).
 - **Keyword Metrics**: Count and list of matched vs. missing keywords.
 - **Resume Excerpt**: Direct quote of the strongest matching evidence block.
 
@@ -232,9 +247,9 @@ These scores were calculated directly by the deterministic scoring engine (no ha
 | **Resume C — Taylor Brooks** | 14.2 |
 
 - **Observed Similar Candidate Gap (|A - B|)**: **6.7 points**
-- **Configured Maximum Similar-Resume Gap**: **15.0 points** (Passed: $6.7 \le 15.0$)
-- **Score Difference vs. Mismatched Profile (A vs. C)**: **+52.4 points** ($66.6 - 14.2$)
-- **Score Difference vs. Mismatched Profile (B vs. C)**: **+45.7 points** ($59.9 - 14.2$)
+- **Configured Maximum Similar-Resume Gap**: **15.0 points** (Passed: 6.7 <= 15.0)
+- **Score Difference vs. Mismatched Profile (A vs. C)**: **+52.4 points** (66.6 - 14.2)
+- **Score Difference vs. Mismatched Profile (B vs. C)**: **+45.7 points** (59.9 - 14.2)
 
 To run the calibration verification test:
 
