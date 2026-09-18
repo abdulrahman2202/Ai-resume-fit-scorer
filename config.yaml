@@ -1,0 +1,15 @@
+scoring:
+  semantic_similarity_weight: 0.60
+  keyword_weight: 0.40
+
+criteria_weights:
+  technical_skills: 0.35
+  experience: 0.25
+  education: 0.15
+  responsibilities: 0.15
+  tools: 0.10
+
+thresholds:
+  strong_match: 0.75
+  partial_match: 0.50
+  minimum_resume_chars: 100
