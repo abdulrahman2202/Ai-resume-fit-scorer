@@ -1,9 +1,16 @@
+import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 import yaml
+from dotenv import load_dotenv
 
-# Path to the root config.yaml
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
+# Path to the root directory
+ROOT_DIR = Path(__file__).resolve().parent.parent
+CONFIG_PATH = ROOT_DIR / "config.yaml"
+ENV_PATH = ROOT_DIR / ".env"
+
+# Ensure .env is loaded
+load_dotenv(dotenv_path=ENV_PATH)
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "scoring": {
@@ -58,3 +65,13 @@ def get_minimum_resume_chars(config_path: Path | str = CONFIG_PATH) -> int:
     config = load_config(config_path)
     thresholds = config.get("thresholds", {})
     return int(thresholds.get("minimum_resume_chars", 100))
+
+
+def get_gemini_api_key() -> Optional[str]:
+    """Retrieve the Gemini API key from environment variables."""
+    return os.getenv("GEMINI_API_KEY")
+
+
+def get_gemini_model() -> str:
+    """Retrieve the Gemini model name from environment variables, defaulting to gemini-2.5-flash."""
+    return os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
