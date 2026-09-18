@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+python-multipart
+pydantic
+pyyaml
+pypdf
+sentence-transformers
+google-genai
+python-dotenv
+numpy
+pytest
