@@ -1,0 +1,27 @@
+Jane Doe
+Email: jane.doe@example.com | Phone: (555) 123-4567 | Location: San Francisco, CA
+LinkedIn: linkedin.com/in/janedoe | GitHub: github.com/janedoe
+
+PROFESSIONAL SUMMARY
+Senior Software Engineer with 6+ years of experience specializing in distributed backend systems, Python, FastAPI, and machine learning infrastructure. Proven track record of architecting scalable microservices, deploying LLM-based pipelines, and mentoring junior engineers.
+
+TECHNICAL SKILLS
+- Programming Languages: Python, Go, SQL, JavaScript
+- Frameworks & Libraries: FastAPI, Flask, PyTorch, HuggingFace, Pydantic, Celery
+- Databases: PostgreSQL, Redis, Elasticsearch, MongoDB
+- Cloud & DevOps: AWS (ECS, S3, RDS), Docker, Kubernetes, CI/CD (GitHub Actions), Terraform
+
+PROFESSIONAL EXPERIENCE
+Senior Backend Engineer | Acme Tech Solutions (2021 – Present)
+- Designed and maintained high-throughput microservices using Python and FastAPI serving 10M+ daily API requests with 99.99% uptime.
+- Integrated semantic search and document parsing pipelines using sentence embeddings and vector databases, reducing search latency by 45%.
+- Implemented comprehensive automated test suites achieving over 90% test coverage with pytest.
+
+Software Engineer | Innovate Corp (2018 – 2021)
+- Developed RESTful APIs and background worker tasks using Python, Redis, and Celery.
+- Optimized database queries and indexes in PostgreSQL, resulting in a 30% reduction in query response times.
+- Collaborated with product and frontend teams to deliver core feature workflows under agile methodology.
+
+EDUCATION
+Bachelor of Science in Computer Science
+University of California, Berkeley (2014 – 2018)
