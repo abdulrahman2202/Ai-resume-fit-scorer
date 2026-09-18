@@ -288,6 +288,8 @@ class CriterionExtractor:
                     config=types.GenerateContentConfig(
                         temperature=0.0,
                         response_mime_type="application/json",
+                        tools=None,
+                        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                     ),
                 )
                 break

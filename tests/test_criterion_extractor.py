@@ -676,3 +676,36 @@ def test_successful_request_makes_one_call_only(sample_jd: str):
     assert len(result.criteria) == 1
     assert client.models.generate_content.call_count == 1
     assert mock_sleep.call_count == 0
+
+
+def test_gemini_call_configuration_disables_afc_and_tools(sample_jd: str):
+    """Verify that generate_content is called with tools=None and AFC explicitly disabled."""
+    payload = {
+        "criteria": [
+            {
+                "name": "Python",
+                "category": "technical_skills",
+                "description": "Python engineering skills",
+                "keywords": ["Python"],
+            }
+        ]
+    }
+    client = make_mock_client(json.dumps(payload))
+    extractor = CriterionExtractor(client=client)
+
+    extractor.extract_criteria(sample_jd)
+
+    assert client.models.generate_content.call_count == 1
+    call_kwargs = client.models.generate_content.call_args.kwargs
+    config = call_kwargs.get("config")
+    assert config is not None
+    # Verify no tools or agents are passed
+    assert getattr(config, "tools", None) is None
+    # Verify AFC is explicitly disabled
+    afc = getattr(config, "automatic_function_calling", None)
+    assert afc is not None
+    assert afc.disable is True
+    # Verify simple JSON generation config
+    assert getattr(config, "response_mime_type", None) == "application/json"
+    assert getattr(config, "temperature", None) == 0.0
+
