@@ -1,0 +1,31 @@
+Jordan Lee
+Email: jordan.lee@example.com | Phone: (555) 876-5432 | Location: Chicago, IL | LinkedIn: linkedin.com/in/jordanlee
+
+SUMMARY OF QUALIFICATIONS
+Lead Backend & AI Platform Engineer with 6.5 years of industry experience engineering scalable backend services, asynchronous processing pipelines, and NLP document intelligence applications. Extensive hands-on experience building FastAPI microservices, managing PostgreSQL datastores, and deploying containerized services on cloud infrastructure.
+
+TECHNICAL EXPERTISE
+- Core Languages: Python, Structured Query Language (SQL)
+- Web & Microservices: FastAPI, RESTful API Design, Microservice Architecture
+- Machine Learning & Search: Embeddings, Semantic Search, NLP Pipelines, LLM Workflows, Vector Stores
+- Data Storage & Cache: PostgreSQL, Redis In-Memory Cache
+- Tools & Cloud Platforms: Docker Containers, GCP, AWS, pytest, Git
+
+RELEVANT EXPERIENCE
+
+Senior Platform Engineer | Synthetix Systems (2020 – Present)
+- Architected and built high-performance distributed microservices using Python and FastAPI for automated document analysis.
+- Constructed reliable document extraction and semantic retrieval pipelines utilizing embedding models and vector indexing.
+- Deployed scalable asynchronous worker processes handling background NLP inferencing and batch data transformations with Redis.
+- Wrote clean, maintainable modular Python code backed by rigorous unit testing suites using pytest.
+- Maintained Docker images and managed cloud infrastructure on both GCP and AWS with automated deployment pipelines.
+
+Backend Developer | Apex Solutions (2017 – 2020)
+- Developed robust REST APIs in Python connecting to high-availability PostgreSQL database clusters.
+- Configured Redis caching mechanisms for rapid session lookups and endpoint acceleration.
+- Collaborated closely with ML researchers to package, containerize, and serve inference endpoints.
+- Maintained CI/CD pipelines and authored unit tests ensuring reliable production releases.
+
+EDUCATION
+Bachelor of Science in Computer Engineering
+University of Illinois at Urbana-Champaign (Graduated 2017)

@@ -1,12 +1,12 @@
 scoring:
-  semantic_similarity_weight: 0.60
+  semantic_weight: 0.60
   keyword_weight: 0.40
 
-criteria_weights:
+category_weights:
   technical_skills: 0.35
   experience: 0.25
-  education: 0.15
-  responsibilities: 0.15
+  education: 0.10
+  responsibilities: 0.20
   tools: 0.10
 
 thresholds:
@@ -18,3 +18,11 @@ matching:
   chunk_size: 500
   chunk_overlap: 50
   embedding_model: "all-MiniLM-L6-v2"
+
+calibration:
+  max_similar_resume_gap: 15.0
+
+gemini:
+  max_retries: 3
+  initial_retry_delay_seconds: 1
+  max_retry_delay_seconds: 8

@@ -370,7 +370,7 @@ def test_gemini_api_error(sample_jd: str):
     """Test that an APIError from the Gemini SDK raises GeminiAPIError."""
     api_err = errors.APIError(500, {"error": "Internal Gemini Server Error"})
     client = make_mock_client(side_effect=api_err)
-    extractor = CriterionExtractor(client=client)
+    extractor = CriterionExtractor(client=client, sleep_fn=MagicMock())
 
     with pytest.raises(GeminiAPIError) as exc_info:
         extractor.extract_criteria(sample_jd)
@@ -381,7 +381,7 @@ def test_gemini_network_error(sample_jd: str):
     """Test that network connection errors raise GeminiAPIError."""
     net_err = httpx.ConnectError("Failed to establish connection to Gemini endpoint")
     client = make_mock_client(side_effect=net_err)
-    extractor = CriterionExtractor(client=client)
+    extractor = CriterionExtractor(client=client, sleep_fn=MagicMock())
 
     with pytest.raises(GeminiAPIError) as exc_info:
         extractor.extract_criteria(sample_jd)
@@ -392,7 +392,7 @@ def test_gemini_timeout_error(sample_jd: str):
     """Test that timeout exceptions raise GeminiTimeoutError."""
     timeout_err = httpx.TimeoutException("Read timed out after 30.0 seconds")
     client = make_mock_client(side_effect=timeout_err)
-    extractor = CriterionExtractor(client=client)
+    extractor = CriterionExtractor(client=client, sleep_fn=MagicMock())
 
     with pytest.raises(GeminiTimeoutError) as exc_info:
         extractor.extract_criteria(sample_jd)
@@ -506,3 +506,173 @@ def test_sample_job_description_file_integration():
     prompt_used = called_args.kwargs["contents"]
     assert "Senior Backend AI Engineer" in prompt_used
     assert "CloudScale AI" in prompt_used
+
+
+# ==============================================================================
+# 9. Transient Failure Retry & Exponential Backoff Tests
+# ==============================================================================
+
+def test_retry_503_followed_by_success(sample_jd: str):
+    """Verify that a 503 UNAVAILABLE failure retries and succeeds on the next attempt."""
+    err_503 = errors.APIError(503, {"error": "503 UNAVAILABLE: High demand"})
+    success_resp = MagicMock()
+    success_resp.text = json.dumps({
+        "criteria": [
+            {
+                "name": "Python Skills",
+                "category": "technical_skills",
+                "description": "Python engineering.",
+                "keywords": ["Python"],
+            }
+        ]
+    })
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.side_effect = [err_503, success_resp]
+    mock_sleep = MagicMock()
+
+    extractor = CriterionExtractor(
+        client=mock_client,
+        max_retries=3,
+        initial_retry_delay=1.0,
+        sleep_fn=mock_sleep,
+    )
+
+    result = extractor.extract_criteria(sample_jd)
+
+    assert len(result.criteria) == 1
+    assert result.criteria[0].name == "Python Skills"
+    # generate_content should be called twice (1 failure + 1 success)
+    assert mock_client.models.generate_content.call_count == 2
+    # sleep_fn should be called once with ~1.0s delay
+    assert mock_sleep.call_count == 1
+    assert mock_sleep.call_args[0][0] == 1.0
+
+
+def test_retry_503_followed_by_503_followed_by_success(sample_jd: str):
+    """Verify that multiple consecutive 503 errors retry with exponential backoff and succeed."""
+    err_503_1 = errors.APIError(503, {"error": "503 UNAVAILABLE: High demand"})
+    err_503_2 = errors.APIError(503, {"error": "503 UNAVAILABLE: High demand"})
+    success_resp = MagicMock()
+    success_resp.text = json.dumps({
+        "criteria": [
+            {
+                "name": "FastAPI",
+                "category": "technical_skills",
+                "description": "FastAPI APIs.",
+                "keywords": ["FastAPI"],
+            }
+        ]
+    })
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.side_effect = [err_503_1, err_503_2, success_resp]
+    mock_sleep = MagicMock()
+
+    extractor = CriterionExtractor(
+        client=mock_client,
+        max_retries=3,
+        initial_retry_delay=1.0,
+        sleep_fn=mock_sleep,
+    )
+
+    result = extractor.extract_criteria(sample_jd)
+
+    assert len(result.criteria) == 1
+    assert mock_client.models.generate_content.call_count == 3
+    # Delays: 1.0s for attempt 1, 2.0s for attempt 2
+    assert mock_sleep.call_count == 2
+    assert mock_sleep.call_args_list[0][0][0] == 1.0
+    assert mock_sleep.call_args_list[1][0][0] == 2.0
+
+
+def test_retry_503_exhausts_all_retries(sample_jd: str):
+    """Verify that persistent 503 errors exhaust all retries and raise GeminiAPIError."""
+    err_503 = errors.APIError(503, {"error": "503 UNAVAILABLE: High demand"})
+    mock_client = MagicMock()
+    mock_client.models.generate_content.side_effect = err_503
+    mock_sleep = MagicMock()
+
+    extractor = CriterionExtractor(
+        client=mock_client,
+        max_retries=3,
+        initial_retry_delay=1.0,
+        sleep_fn=mock_sleep,
+    )
+
+    with pytest.raises(GeminiAPIError) as exc_info:
+        extractor.extract_criteria(sample_jd)
+
+    assert "Gemini API error (503)" in str(exc_info.value)
+    # 1 initial try + 3 retries = 4 calls total
+    assert mock_client.models.generate_content.call_count == 4
+    # 3 retry delays: 1.0, 2.0, 4.0
+    assert mock_sleep.call_count == 3
+    delays = [call[0][0] for call in mock_sleep.call_args_list]
+    assert delays == [1.0, 2.0, 4.0]
+
+
+def test_permanent_400_and_404_no_retry(sample_jd: str):
+    """Verify that permanent 400 (Bad Request) and 404 (Not Found) errors do NOT trigger retries."""
+    err_400 = errors.APIError(400, {"error": "Invalid argument provided to Gemini"})
+    mock_client_400 = MagicMock()
+    mock_client_400.models.generate_content.side_effect = err_400
+    mock_sleep_400 = MagicMock()
+
+    extractor_400 = CriterionExtractor(
+        client=mock_client_400,
+        max_retries=3,
+        sleep_fn=mock_sleep_400,
+    )
+
+    with pytest.raises(GeminiAPIError):
+        extractor_400.extract_criteria(sample_jd)
+
+    # Exactly 1 call, 0 sleep retries
+    assert mock_client_400.models.generate_content.call_count == 1
+    assert mock_sleep_400.call_count == 0
+
+    err_404 = errors.APIError(404, {"error": "Model not found"})
+    mock_client_404 = MagicMock()
+    mock_client_404.models.generate_content.side_effect = err_404
+    mock_sleep_404 = MagicMock()
+
+    extractor_404 = CriterionExtractor(
+        client=mock_client_404,
+        max_retries=3,
+        sleep_fn=mock_sleep_404,
+    )
+
+    with pytest.raises(GeminiAPIError):
+        extractor_404.extract_criteria(sample_jd)
+
+    assert mock_client_404.models.generate_content.call_count == 1
+    assert mock_sleep_404.call_count == 0
+
+
+def test_successful_request_makes_one_call_only(sample_jd: str):
+    """Verify that a successful request executes exactly one call with zero retries."""
+    payload = {
+        "criteria": [
+            {
+                "name": "Testing",
+                "category": "responsibilities",
+                "description": "Write pytest suites.",
+                "keywords": ["pytest"],
+            }
+        ]
+    }
+    client = make_mock_client(json.dumps(payload))
+    mock_sleep = MagicMock()
+
+    extractor = CriterionExtractor(
+        client=client,
+        max_retries=3,
+        sleep_fn=mock_sleep,
+    )
+
+    result = extractor.extract_criteria(sample_jd)
+
+    assert len(result.criteria) == 1
+    assert client.models.generate_content.call_count == 1
+    assert mock_sleep.call_count == 0

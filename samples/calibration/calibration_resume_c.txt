@@ -1,0 +1,29 @@
+Taylor Brooks
+Email: taylor.brooks@example.com | Phone: (555) 345-6789 | Location: Brooklyn, NY | Portfolio: taylorbrooks.design
+
+PROFESSIONAL SUMMARY
+Creative Frontend Web Developer and Graphic Designer with 1.5 years of professional experience crafting responsive websites, digital marketing assets, and interactive user interfaces. Skilled in client-side HTML, CSS, React, and modern UI design tooling.
+
+CORE SKILLS
+- Frontend Languages & Libraries: JavaScript, HTML5, CSS3, React, Tailwind CSS
+- Design & Prototyping Tools: Figma, Adobe Photoshop, Adobe Illustrator, InDesign
+- Content Management: WordPress, Webflow, Shopify
+- Version Control & Workflows: Git, GitHub, Agile Sprint Planning
+
+WORK EXPERIENCE
+
+Junior Web Developer | PixelCraft Design Studio (2023 – Present)
+- Developed responsive marketing websites and digital landing pages for boutique retail clients using HTML, CSS, JavaScript, and React components.
+- Translated visual mockups and wireframes from Figma into clean client-side webpage code.
+- Configured customized WordPress themes, updated blog layouts, and integrated contact forms.
+- Performed cross-browser layout testing and mobile responsiveness checks across Safari, Chrome, and Firefox.
+- Collaborated with creative directors and digital marketers on brand identity and social media visual assets.
+
+Graphic Design & Marketing Intern | Creative Spark Media (2022 – 2023)
+- Created digital promotional graphics, banners, and typography layouts for email marketing newsletters.
+- Assisted lead web designer with updating client website graphics and formatting product photography.
+- Maintained organized media libraries and exported optimized web assets.
+
+EDUCATION
+Bachelor of Arts in Graphic Design
+Rhode Island School of Design, Providence, RI (Graduated 2022)

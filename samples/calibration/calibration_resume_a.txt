@@ -1,0 +1,32 @@
+Alex Morgan
+Email: alex.morgan@example.com | Phone: (555) 234-5678 | Location: Seattle, WA | GitHub: github.com/alexmorgan
+
+PROFESSIONAL SUMMARY
+Senior Software Engineer with 6 years of experience specializing in Python backend systems, microservice architectures, and AI pipeline infrastructure. Proven track record building high-concurrency RESTful APIs with FastAPI, orchestrating LLM retrieval pipelines, and managing cloud deployments on AWS.
+
+CORE TECHNICAL SKILLS
+- Programming Languages: Python, SQL
+- Backend Frameworks: FastAPI, RESTful APIs, Pydantic
+- AI & NLP: Sentence-Transformers, Embeddings, Vector Databases, Semantic Search, LLM Integration
+- Databases & Caching: PostgreSQL, Redis
+- DevOps & Cloud: Docker, AWS (ECS, S3, RDS, Lambda), CI/CD pipelines
+- Testing & Quality: pytest, Clean Architecture, High Test Coverage
+
+PROFESSIONAL EXPERIENCE
+
+Senior Backend Engineer | DataFlow AI (2021 – Present)
+- Designed, built, and deployed production-grade microservices using Python and FastAPI handling over 15M daily requests with sub-50ms latency.
+- Developed document extraction and semantic matching systems utilizing modern NLP techniques, sentence embeddings, and vector similarity search.
+- Orchestrated asynchronous worker pipelines with Redis and Celery to serve real-time LLM inference requests.
+- Maintained strict code quality and high test coverage (>90%) across all microservices using pytest.
+- Containerized applications with Docker and managed production deployments on AWS ECS and RDS PostgreSQL.
+
+Software Engineer | NexaTech Solutions (2018 – 2021)
+- Built scalable RESTful APIs using Python frameworks and PostgreSQL database architectures.
+- Implemented Redis caching layers to reduce database query loads by 45%.
+- Packaged multi-service applications using Docker containers and maintained automated CI/CD build scripts.
+- Collaborated with data scientists to package and deploy predictive machine learning models into production services.
+
+EDUCATION
+Bachelor of Science in Computer Science
+University of Washington, Seattle, WA (Graduated 2018)

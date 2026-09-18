@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -132,3 +132,30 @@ class ResumeMatchResult(BaseModel):
         default_factory=list,
         description="Individual criterion match results",
     )
+
+
+class ScoredCriterion(BaseModel):
+    """Criterion evaluated with deterministic score and reasoning."""
+    name: str = Field(..., description="Name of the criterion")
+    category: CriterionCategory = Field(..., description="Category of the criterion")
+    score: float = Field(..., ge=0.0, le=100.0, description="Criterion score scaled from 0.0 to 100.0")
+    semantic_score: float = Field(..., ge=0.0, le=1.0, description="Semantic similarity score [0.0, 1.0]")
+    keyword_score: float = Field(..., ge=0.0, le=1.0, description="Keyword evidence score [0.0, 1.0]")
+    matched_keywords: List[str] = Field(default_factory=list, description="Keywords found in the resume")
+    evidence: str = Field(default="", description="Resume chunk serving as evidence")
+    reason: str = Field(..., description="Deterministic explanation of the score")
+
+
+class ScoringResponse(BaseModel):
+    """API response containing overall fit score and per-criterion evaluations."""
+    overall_score: float = Field(..., ge=0.0, le=100.0, description="Overall candidate match score [0.0, 100.0]")
+    criteria: List[ScoredCriterion] = Field(..., description="List of scored criteria evaluations")
+    category_scores: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="Aggregated score per category",
+    )
+
+
+class HealthResponse(BaseModel):
+    """Health check response."""
+    status: str = Field("healthy", description="Application health status")

@@ -3,6 +3,7 @@ Job Requirement Extraction Service using Google Gemini API.
 
 Extracts structured hiring criteria (technical skills, experience, education,
 responsibilities, tools) from raw job descriptions and validates them with Pydantic.
+Includes automatic exponential backoff retry for transient Gemini failures (429, 500, 502, 503, 504).
 This module strictly performs requirement extraction without candidate scoring,
 ranking, or evaluation.
 """
@@ -10,6 +11,7 @@ ranking, or evaluation.
 import json
 import logging
 import re
+import time
 from typing import Any, Dict, List, Optional, Union
 
 import httpx
@@ -17,7 +19,13 @@ from google import genai
 from google.genai import errors, types
 from pydantic import ValidationError
 
-from app.config import get_gemini_api_key, get_gemini_model
+from app.config import (
+    get_gemini_api_key,
+    get_gemini_initial_retry_delay,
+    get_gemini_max_retries,
+    get_gemini_max_retry_delay,
+    get_gemini_model,
+)
 from app.models.schemas import (
     Criterion,
     CriterionCategory,
@@ -72,6 +80,84 @@ class ExtractionSchemaValidationError(CriterionExtractionError):
 
 
 # ==============================================================================
+# Retry Classification Helpers
+# ==============================================================================
+
+TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
+PERMANENT_STATUS_CODES = {400, 401, 403, 404}
+
+
+def is_transient_gemini_error(exc: Exception) -> bool:
+    """
+    Determine whether an exception represents a transient failure eligible for retry.
+    Retries: 429, 500, 502, 503, 504, connection dropouts, and timeouts.
+    Rejects: 400 (bad request), 401/403 (invalid key / auth), 404 (not found).
+    """
+    code = getattr(exc, "code", None)
+    if code is not None and isinstance(code, int):
+        if code in PERMANENT_STATUS_CODES:
+            return False
+        if code in TRANSIENT_STATUS_CODES:
+            return True
+
+    # Check for HTTP status codes on response objects
+    response_obj = getattr(exc, "response", None)
+    if response_obj is not None:
+        status_code = getattr(response_obj, "status_code", None)
+        if status_code is not None and isinstance(status_code, int):
+            if status_code in PERMANENT_STATUS_CODES:
+                return False
+            if status_code in TRANSIENT_STATUS_CODES:
+                return True
+
+    # Timeouts and network interruptions are transient
+    if isinstance(exc, (TimeoutError, httpx.TimeoutException, httpx.NetworkError, httpx.ConnectError)):
+        return True
+
+    err_msg = str(exc).lower()
+
+    # Explicit permanent indicators
+    for perm_indicator in ("400", "401", "403", "404", "invalid_argument", "not_found", "permission_denied"):
+        if perm_indicator in err_msg:
+            return False
+
+    # Explicit transient indicators
+    for trans_indicator in (
+        "503",
+        "unavailable",
+        "high demand",
+        "temporary",
+        "429",
+        "resource_exhausted",
+        "rate limit",
+        "500",
+        "internal server error",
+        "502",
+        "bad gateway",
+        "504",
+        "gateway timeout",
+        "timed out",
+        "timeout",
+    ):
+        if trans_indicator in err_msg:
+            return True
+
+    return False
+
+
+def _translate_api_exception(exc: Exception) -> None:
+    """Translate raw SDK or network exceptions into appropriate domain exceptions."""
+    err_msg = str(exc).lower()
+    if isinstance(exc, (TimeoutError, httpx.TimeoutException)) or "timeout" in err_msg or "timed out" in err_msg:
+        raise GeminiTimeoutError(f"Gemini API request timed out: {exc}") from exc
+    if isinstance(exc, errors.APIError):
+        raise GeminiAPIError(f"Gemini API error ({exc.code}): {exc}") from exc
+    if isinstance(exc, (httpx.HTTPError, httpx.RequestError)):
+        raise GeminiAPIError(f"Gemini network communication error: {exc}") from exc
+    raise GeminiAPIError(f"Unexpected error calling Gemini API: {exc}") from exc
+
+
+# ==============================================================================
 # Prompt Template
 # ==============================================================================
 
@@ -119,7 +205,8 @@ Your sole task is to analyze the following Job Description and extract structure
 
 class CriterionExtractor:
     """
-    Extracts structured hiring criteria from job descriptions using the Google GenAI SDK.
+    Extracts structured hiring criteria from job descriptions using the Google GenAI SDK
+    with automatic exponential backoff for transient failures.
     """
 
     def __init__(
@@ -127,16 +214,32 @@ class CriterionExtractor:
         api_key: Optional[str] = None,
         model_name: Optional[str] = None,
         client: Optional[genai.Client] = None,
+        max_retries: Optional[int] = None,
+        initial_retry_delay: Optional[float] = None,
+        max_retry_delay: Optional[float] = None,
+        sleep_fn: Optional[Any] = None,
     ) -> None:
         """
         Initialize the CriterionExtractor.
 
         Args:
             api_key: Gemini API key. Defaults to environment variable GEMINI_API_KEY.
-            model_name: Gemini model name. Defaults to environment variable GEMINI_MODEL or 'gemini-2.5-flash'.
+            model_name: Gemini model name. Defaults to environment variable GEMINI_MODEL or 'gemini-3.6-flash'.
             client: Pre-configured genai.Client instance (useful for mocking in tests).
+            max_retries: Maximum number of retry attempts for transient errors.
+            initial_retry_delay: Initial retry delay in seconds (for exponential backoff).
+            max_retry_delay: Maximum retry delay ceiling in seconds.
+            sleep_fn: Function to execute delays (default: time.sleep, can be mocked).
         """
         self.model_name = model_name or get_gemini_model()
+        self.max_retries = max_retries if max_retries is not None else get_gemini_max_retries()
+        self.initial_retry_delay = (
+            initial_retry_delay if initial_retry_delay is not None else get_gemini_initial_retry_delay()
+        )
+        self.max_retry_delay = (
+            max_retry_delay if max_retry_delay is not None else get_gemini_max_retry_delay()
+        )
+        self.sleep_fn = sleep_fn if sleep_fn is not None else time.sleep
 
         if client is not None:
             self.client = client
@@ -168,33 +271,43 @@ class CriterionExtractor:
 
     def _call_gemini(self, prompt: str) -> str:
         """
-        Execute the Gemini API request. Isolated for mocking and clean error translation.
+        Execute the Gemini API request with automatic exponential backoff for transient failures.
 
         Raises:
-            GeminiTimeoutError: If the request times out.
-            GeminiAPIError: If an API, network, or communication error occurs.
+            GeminiTimeoutError: If the request times out after retries.
+            GeminiAPIError: If an API or network error occurs after retries.
             EmptyGeminiResponseError: If the response is empty, None, or contains no candidates.
         """
-        try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    response_mime_type="application/json",
-                ),
-            )
-        except (TimeoutError, httpx.TimeoutException) as exc:
-            raise GeminiTimeoutError(f"Gemini API request timed out: {exc}") from exc
-        except errors.APIError as exc:
-            raise GeminiAPIError(f"Gemini API error: {exc}") from exc
-        except (httpx.HTTPError, httpx.RequestError) as exc:
-            raise GeminiAPIError(f"Gemini network communication error: {exc}") from exc
-        except Exception as exc:
-            err_msg = str(exc).lower()
-            if "timeout" in err_msg or "timed out" in err_msg:
-                raise GeminiTimeoutError(f"Gemini API request timed out: {exc}") from exc
-            raise GeminiAPIError(f"Unexpected error calling Gemini API: {exc}") from exc
+        response = None
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.0,
+                        response_mime_type="application/json",
+                    ),
+                )
+                break
+            except Exception as exc:
+                if attempt < self.max_retries and is_transient_gemini_error(exc):
+                    delay = min(
+                        self.max_retry_delay,
+                        self.initial_retry_delay * (2 ** attempt),
+                    )
+                    logger.warning(
+                        "Transient Gemini API error on attempt %d/%d (%s). Retrying in %.2fs...",
+                        attempt + 1,
+                        self.max_retries,
+                        exc,
+                        delay,
+                    )
+                    self.sleep_fn(delay)
+                    continue
+                # Not transient or retries exhausted
+                _translate_api_exception(exc)
 
         if response is None:
             raise EmptyGeminiResponseError("Gemini API returned None.")
@@ -282,9 +395,21 @@ def extract_job_criteria(
     api_key: Optional[str] = None,
     model_name: Optional[str] = None,
     client: Optional[genai.Client] = None,
+    max_retries: Optional[int] = None,
+    initial_retry_delay: Optional[float] = None,
+    max_retry_delay: Optional[float] = None,
+    sleep_fn: Optional[Any] = None,
 ) -> CriterionExtractionResponse:
     """
     Convenience wrapper to extract structured criteria from a job description.
     """
-    extractor = CriterionExtractor(api_key=api_key, model_name=model_name, client=client)
+    extractor = CriterionExtractor(
+        api_key=api_key,
+        model_name=model_name,
+        client=client,
+        max_retries=max_retries,
+        initial_retry_delay=initial_retry_delay,
+        max_retry_delay=max_retry_delay,
+        sleep_fn=sleep_fn,
+    )
     return extractor.extract_criteria(job_description)

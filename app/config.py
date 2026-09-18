@@ -1,3 +1,4 @@
+import math
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -12,16 +13,22 @@ ENV_PATH = ROOT_DIR / ".env"
 # Ensure .env is loaded
 load_dotenv(dotenv_path=ENV_PATH)
 
+
+class ConfigurationError(Exception):
+    """Raised when configuration values are missing, corrupt, or invalid."""
+    pass
+
+
 DEFAULT_CONFIG: Dict[str, Any] = {
     "scoring": {
-        "semantic_similarity_weight": 0.60,
+        "semantic_weight": 0.60,
         "keyword_weight": 0.40,
     },
-    "criteria_weights": {
+    "category_weights": {
         "technical_skills": 0.35,
         "experience": 0.25,
-        "education": 0.15,
-        "responsibilities": 0.15,
+        "education": 0.10,
+        "responsibilities": 0.20,
         "tools": 0.10,
     },
     "thresholds": {
@@ -33,6 +40,14 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "chunk_size": 500,
         "chunk_overlap": 50,
         "embedding_model": "all-MiniLM-L6-v2",
+    },
+    "calibration": {
+        "max_similar_resume_gap": 15.0,
+    },
+    "gemini": {
+        "max_retries": 3,
+        "initial_retry_delay_seconds": 1.0,
+        "max_retry_delay_seconds": 8.0,
     },
 }
 
@@ -78,8 +93,32 @@ def get_gemini_api_key() -> Optional[str]:
 
 
 def get_gemini_model() -> str:
-    """Retrieve the Gemini model name from environment variables, defaulting to gemini-2.5-flash."""
-    return os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    """Retrieve the Gemini model name from environment variables, defaulting to gemini-3.6-flash."""
+    return os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+
+
+def get_gemini_config(config_path: Path | str = CONFIG_PATH) -> Dict[str, Any]:
+    """Retrieve the gemini configuration section."""
+    config = load_config(config_path)
+    return config.get("gemini", DEFAULT_CONFIG["gemini"])
+
+
+def get_gemini_max_retries(config_path: Path | str = CONFIG_PATH) -> int:
+    """Retrieve maximum retry attempts for Gemini API calls."""
+    cfg = get_gemini_config(config_path)
+    return int(cfg.get("max_retries", 3))
+
+
+def get_gemini_initial_retry_delay(config_path: Path | str = CONFIG_PATH) -> float:
+    """Retrieve initial retry delay in seconds for Gemini API calls."""
+    cfg = get_gemini_config(config_path)
+    return float(cfg.get("initial_retry_delay_seconds", 1.0))
+
+
+def get_gemini_max_retry_delay(config_path: Path | str = CONFIG_PATH) -> float:
+    """Retrieve maximum retry delay in seconds for Gemini API calls."""
+    cfg = get_gemini_config(config_path)
+    return float(cfg.get("max_retry_delay_seconds", 8.0))
 
 
 def get_matching_config(config_path: Path | str = CONFIG_PATH) -> Dict[str, Any]:
@@ -104,3 +143,73 @@ def get_embedding_model_name(config_path: Path | str = CONFIG_PATH) -> str:
     """Retrieve the sentence-transformers model name."""
     cfg = get_matching_config(config_path)
     return str(cfg.get("embedding_model", "all-MiniLM-L6-v2"))
+
+
+def get_scoring_weights(config_path: Path | str = CONFIG_PATH) -> Dict[str, float]:
+    """
+    Retrieve semantic and keyword scoring weights.
+    Supports backward-compatible aliases (semantic_similarity_weight / semantic_weight).
+    """
+    config = load_config(config_path)
+    scoring = config.get("scoring", {})
+    sem = scoring.get("semantic_weight", scoring.get("semantic_similarity_weight", 0.60))
+    kw = scoring.get("keyword_weight", 0.40)
+    return {"semantic_weight": float(sem), "keyword_weight": float(kw)}
+
+
+def get_category_weights(config_path: Path | str = CONFIG_PATH) -> Dict[str, float]:
+    """
+    Retrieve category weights.
+    Supports backward-compatible aliases (category_weights / criteria_weights).
+    """
+    config = load_config(config_path)
+    cat_weights = config.get("category_weights", config.get("criteria_weights", {}))
+    if not cat_weights:
+        cat_weights = DEFAULT_CONFIG["category_weights"]
+    return {k: float(v) for k, v in cat_weights.items()}
+
+
+def get_calibration_config(config_path: Path | str = CONFIG_PATH) -> Dict[str, Any]:
+    """Retrieve the calibration configuration section."""
+    config = load_config(config_path)
+    return config.get("calibration", DEFAULT_CONFIG.get("calibration", {"max_similar_resume_gap": 15.0}))
+
+
+def get_max_similar_resume_gap(config_path: Path | str = CONFIG_PATH) -> float:
+    """Retrieve the maximum acceptable score gap between similar resumes."""
+    cal = get_calibration_config(config_path)
+    return float(cal.get("max_similar_resume_gap", 15.0))
+
+
+def validate_configuration(config_path: Path | str = CONFIG_PATH) -> None:
+    """
+    Validate that scoring weights and category weights are properly configured and sum to 1.0.
+
+    Raises:
+        ConfigurationError: If any weight is invalid or sums do not equal 1.0.
+    """
+    scoring = get_scoring_weights(config_path)
+    sem = scoring["semantic_weight"]
+    kw = scoring["keyword_weight"]
+
+    if sem < 0.0 or kw < 0.0:
+        raise ConfigurationError(f"Scoring weights must be non-negative, got semantic={sem}, keyword={kw}")
+
+    total_scoring = sem + kw
+    if not math.isclose(total_scoring, 1.0, abs_tol=1e-4):
+        raise ConfigurationError(
+            f"Scoring weights must sum to 1.0, got semantic_weight={sem} + keyword_weight={kw} = {total_scoring:.4f}"
+        )
+
+    cat_weights = get_category_weights(config_path)
+    if not cat_weights:
+        raise ConfigurationError("Category weights configuration is empty.")
+
+    if any(w < 0.0 for w in cat_weights.values()):
+        raise ConfigurationError(f"Category weights must be non-negative: {cat_weights}")
+
+    total_cat = sum(cat_weights.values())
+    if not math.isclose(total_cat, 1.0, abs_tol=1e-4):
+        raise ConfigurationError(
+            f"Category weights must sum to 1.0, got {total_cat:.4f}: {cat_weights}"
+        )
