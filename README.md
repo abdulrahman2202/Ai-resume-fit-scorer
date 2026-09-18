@@ -4,88 +4,96 @@ An applied-AI evaluation tool designed to analyze resumes against job descriptio
 
 ---
 
-## Current Status: Step 2 – Gemini Job Requirement Extraction
+## Current Status: Step 3 – Resume-to-Criterion Matching Engine
 
-The first two phases of the pipeline are complete:
+The first three phases of the pipeline are complete:
 - **Step 1**: Multi-format document ingestion and validation for resumes and job descriptions.
-- **Step 2**: Gemini-powered extraction of structured hiring criteria from job descriptions with strict Pydantic schema validation.
+- **Step 2**: Gemini-powered extraction of structured hiring criteria with strict Pydantic schema validation.
+- **Step 3**: Deterministic resume-to-criterion matching engine computing dual signals (semantic similarity via `all-MiniLM-L6-v2` and keyword evidence).
 
-### Architecture & Isolation Mandate
+---
+
+## Architecture & Design Decisions
 
 ```
 Job Description
       ↓
-Gemini API (gemini-2.5-flash)
+Gemini API (gemini-2.5-flash) [Step 2]
       ↓
-Structured Hiring Criteria
+Structured Hiring Criteria (Pydantic validated)
       ↓
-Pydantic Schema Validation
+┌────────────────────────────────────────────────────────┐
+│ Matching Engine [Step 3]                               │
+│                                                        │
+│  Resume Text ──► Paragraph Chunking (500 char blocks) │
+│                        │                               │
+│                        ▼                               │
+│  1. Semantic Match: all-MiniLM-L6-v2 Embeddings        │
+│     (Cosine similarity against resume chunks)          │
+│     ──► semantic_score & best evidence chunk           │
+│                                                        │
+│  2. Keyword Evidence: Deterministic Regex Matching     │
+│     (Case-insensitive, whitespace-tolerant)            │
+│     ──► keyword_score, matched & unmatched lists       │
+└────────────────────────────────────────────────────────┘
+      ↓
+CriterionMatchResult (No final scoring in Step 3)
 ```
 
-> **Strict Non-Scoring Mandate**: Gemini is solely responsible for extracting hiring criteria from job descriptions. Gemini does **NOT** score resumes, calculate overall scores, rank candidates, or evaluate candidate suitability. All scoring logic is reserved for subsequent deterministic scoring components.
+### Why Embeddings Are Used
+Embedding models (`all-MiniLM-L6-v2` via `sentence-transformers`) transform text into dense vector representations where geometric proximity corresponds to semantic similarity. Candidates frequently express qualifications through synonyms, paraphrasing, or conceptual descriptions (e.g. "built asynchronous microservices" matches "REST API backend engineering") that keyword searches miss entirely.
+
+### Why Keyword Matching Is Also Used
+While embeddings capture semantic context, they can be overly forgiving with strict technical specifics. For example, in vector space, "AWS", "GCP", and "Azure" are proximate because all represent cloud providers. Keyword evidence enforces precision by verifying that exact required tools, languages, frameworks, or certifications are literally present.
+
+### Why Gemini Is NOT Used for Matching
+Employing LLMs for candidate matching introduces:
+1. **Non-determinism**: Varying scores across runs for the exact same resume.
+2. **Hallucination risk**: Imagining candidate qualifications or overlooking stated experience.
+3. **Prompt injection vulnerabilities**: Susceptibility to resume-based prompt injections.
+4. **Latency & Cost**: Significant network latency and token expenses per candidate.
+
+A hybrid of local embeddings and deterministic regex keyword matching is completely reproducible, explainable, private, and runs in milliseconds.
+
+### How Resume Chunking Works
+Resumes are naturally structured into sections, bullet points, and paragraphs. Our simple, maintainable chunker:
+- Respects natural paragraph boundaries (`\n\n`) and line breaks.
+- Sequentially bundles paragraphs up to a configurable `max_chunk_size` (default: 500 characters).
+- Supports a configurable `chunk_overlap` (default: 50 characters) to preserve context across boundaries.
+- Slices oversized blocks cleanly without external NLP dependencies.
+- Evaluates each criterion against all chunks to isolate the single strongest evidence snippet.
+
+### What the Semantic Score Means
+The semantic score represents the peak cosine similarity between a criterion's query (`name: description`) and the candidate's resume chunks:
+- **Raw Cosine Similarity**: Mathematical cosine in $[-1.0, 1.0]$.
+- **Normalization Transformation**: Clamped to $[0.0, 1.0]$ via `max(0.0, min(1.0, raw_sim))`. Positive cosine values are preserved without distortion, while negative noise (divergent/opposite concepts) is clamped to zero (avoiding affine distortions that falsely turn orthogonal text into 50% matches).
+- **Evidence**: The specific resume chunk that generated the highest similarity is captured as supporting evidence.
+
+### What the Keyword Score Means
+The keyword score is the exact proportion of a criterion's predefined keywords present in the resume:
+$$\text{keyword\_score} = \frac{\text{matched\_keywords}}{\text{total\_keywords}} \in [0.0, 1.0]$$
+- **Matching Rules**: Case-insensitive, whitespace-tolerant, and word-boundary aware (`(?<!\w)...\s+...(?!\w)`). Technical symbols (e.g., `C++`, `C#`, `.NET`) are safely matched.
+- If a criterion defines no keywords, `keyword_score` defaults safely to `0.0`.
 
 ---
 
-### Step 2 Features Implemented
+## Step 3 Features Implemented
 
-1. **Structured Criteria Extraction (`app/services/criterion_extractor.py`)**:
-   - Uses the official Google GenAI Python SDK (`google-genai`).
-   - Configured via environment variables (`GEMINI_API_KEY`, `GEMINI_MODEL=gemini-2.5-flash` in `.env`).
-   - Temperature pinned to `0.0` for deterministic requirement extraction.
-   - Automatically handles JSON response format and strips markdown code fences (` ```json ... ``` `).
+1. **`ResumeMatcher` Service (`app/services/matcher.py`)**:
+   - Paragraph-aware resume chunking with configurable size and overlap.
+   - Singleton `EmbeddingModelManager` ensuring `all-MiniLM-L6-v2` is loaded once and reused across evaluations.
+   - Pure NumPy cosine similarity and explicit $[0.0, 1.0]$ normalization.
+   - Deterministic keyword evidence extractor returning matched and unmatched keyword lists.
+   - Safe edge-case handling for empty resumes, blank criteria, and inference exceptions.
 
-2. **Strict Pydantic Schemas (`app/models/schemas.py`)**:
-   - **`CriterionCategory`**: Enforces the 5 allowed categories:
-     - `technical_skills`: Languages, architectures, core principles, technical domains.
-     - `experience`: Years of experience, seniority level, industry background.
-     - `education`: Degrees, academic majors, required credentials.
-     - `responsibilities`: Core day-to-day duties, deliveries, project management.
-     - `tools`: Specific applications, cloud platforms (AWS, GCP, Azure), databases, CI/CD tools.
-   - **`Criterion`**:
-     - `name`: Requirement title (min length 1, trimmed).
-     - `category`: Validated against `CriterionCategory`.
-     - `description`: Detailed requirement description (min length 1, trimmed).
-     - `keywords`: Cleaned, trimmed, and deduplicated matching keywords.
-   - **`CriterionExtractionResponse`**:
-     - `criteria`: Required list of `Criterion` objects.
-     - Automatic deduplication and keyword merging across duplicate criteria.
+2. **Pydantic Match Schemas (`app/models/schemas.py`)**:
+   - `CriterionMatchResult`: Holds `criterion_name`, `criterion_category`, `semantic_score`, `raw_semantic_score`, `keyword_score`, `matched_keywords`, `unmatched_keywords`, and `evidence`.
+   - `ResumeMatchResult`: Holds the collection of individual `CriterionMatchResult` objects.
 
-3. **Robust Error Handling Hierarchy**:
-   - `CriterionExtractionError` (base)
-     - `ConfigurationError`: Missing or placeholder `GEMINI_API_KEY`.
-     - `InvalidJobDescriptionError`: Empty or blank job description input.
-     - `GeminiAPIError`: Network, HTTP, or Gemini API communication failures.
-       - `GeminiTimeoutError`: Request timeouts from Gemini or network layers.
-     - `EmptyGeminiResponseError`: Empty, null, or candidate-free model responses.
-     - `InvalidExtractionJSONError`: Malformed JSON or unexpected non-JSON structures.
-     - `ExtractionSchemaValidationError`: Pydantic validation failures (missing required fields, invalid categories).
-
-4. **Zero Live Network Calls in Tests**:
-   - Tests mock the Gemini client and SDK interfaces completely.
-   - No active API keys or external network connections are needed to run tests.
-
----
-
-### Step 1 Features Implemented
-
-1. **Multi-Format Document Ingestion**:
-   - **PDF Extraction**: Uses `pypdf` to extract text from multi-page PDF documents.
-   - **Plain Text (TXT) Extraction**: Supports UTF-8 and Latin-1 encoded text documents.
-   - **Job Description Extraction**: Accepts direct string inputs or text/PDF files.
-
-2. **Error Handling & Failure Protection**:
-   - Custom exception hierarchy rooted at `ResumeExtractionError`:
-     - `UnsupportedFileTypeError`: Enforces supported formats (`.pdf`, `.txt`) and rejects unsupported files.
-     - `UnreadableDocumentError`: Protects against corrupted PDFs, zero-byte files, password-protected files, and scanned PDFs.
-     - `DocumentTooShortError`: Validates that extracted text satisfies minimum character thresholds.
-
-3. **Configurable Thresholds**:
-   - Configured via `config.yaml` using `thresholds.minimum_resume_chars` (default: 100 characters).
-
-4. **Text Cleaning & Normalization**:
-   - Strips null bytes and control characters.
-   - Normalizes line breaks (`CRLF` / `CR` to `LF`).
-   - Normalizes excessive horizontal whitespace while preserving paragraph semantics.
+3. **Configurable Matching Parameters (`config.yaml`)**:
+   - `matching.chunk_size`: 500 characters
+   - `matching.chunk_overlap`: 50 characters
+   - `matching.embedding_model`: `all-MiniLM-L6-v2`
 
 ---
 
@@ -98,12 +106,12 @@ app/
 ├── main.py
 ├── models/
 │   ├── __init__.py
-│   └── schemas.py            # Pydantic schemas (Criterion, CriterionCategory, etc.)
+│   └── schemas.py            # Pydantic schemas (Criterion, CriterionMatchResult, etc.)
 ├── services/
 │   ├── __init__.py
 │   ├── extractor.py          # Document parsing & text extraction (Step 1)
 │   ├── criterion_extractor.py # Gemini JD criteria extraction & validation (Step 2)
-│   ├── matcher.py
+│   ├── matcher.py            # Dual-signal resume-to-criterion matching engine (Step 3)
 │   └── scorer.py
 └── utils/
     ├── __init__.py
@@ -111,14 +119,15 @@ app/
 
 tests/
 ├── test_parser.py            # Step 1 unit tests (25 tests)
-└── test_criterion_extractor.py # Step 2 unit tests (23 tests)
+├── test_criterion_extractor.py # Step 2 unit tests (23 tests)
+└── test_matcher.py           # Step 3 unit & integration tests (20 tests)
 
 samples/
 ├── sample_resume.txt         # Sample software engineer resume in TXT
 ├── sample_resume.pdf         # Sample ML engineer resume in PDF
 └── sample_job_description.txt # Sample job description
 
-config.yaml                   # Application scoring and threshold configuration
+config.yaml                   # Application scoring, threshold, and matching configuration
 requirements.txt              # Python dependencies
 .env                          # Gemini API credentials & model settings
 ```
@@ -133,10 +142,13 @@ Run the complete test suite using `pytest`:
 pytest -v
 ```
 
-Or using the local virtual environment:
+Or using the project's virtual environment:
 
 ```powershell
 .\venv\Scripts\python -m pytest -v
 ```
 
-All 48 test cases (25 parser tests + 23 criterion extractor tests) will execute and pass without requiring external API calls.
+All 68 test cases across all three steps will execute and pass:
+- **Step 1 (Parser)**: 25 tests
+- **Step 2 (Gemini Criterion Extractor)**: 23 tests
+- **Step 3 (Resume Matcher)**: 20 tests

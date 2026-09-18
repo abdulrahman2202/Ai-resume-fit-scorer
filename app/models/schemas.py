@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -86,3 +86,49 @@ class CriterionExtractionResponse(BaseModel):
                     keywords=combined_kw,
                 )
         return CriterionExtractionResponse(criteria=list(unique_criteria.values()))
+
+
+class CriterionMatchResult(BaseModel):
+    """Result of matching a single job criterion against a resume."""
+    criterion_name: str = Field(..., description="Name of the criterion being evaluated")
+    criterion_category: Optional[CriterionCategory] = Field(
+        None, description="Category of the criterion"
+    )
+    semantic_score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Semantic similarity score normalized to [0.0, 1.0]",
+    )
+    raw_semantic_score: float = Field(
+        ...,
+        ge=-1.0,
+        le=1.0,
+        description="Raw cosine similarity in [-1.0, 1.0] before clamping",
+    )
+    keyword_score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of criterion keywords found in the resume [0.0, 1.0]",
+    )
+    matched_keywords: List[str] = Field(
+        default_factory=list,
+        description="Keywords found in the resume",
+    )
+    unmatched_keywords: List[str] = Field(
+        default_factory=list,
+        description="Keywords not found in the resume",
+    )
+    evidence: str = Field(
+        default="",
+        description="Resume text chunk that produced the strongest semantic match",
+    )
+
+
+class ResumeMatchResult(BaseModel):
+    """Aggregate result of matching all criteria against a resume."""
+    matches: List[CriterionMatchResult] = Field(
+        default_factory=list,
+        description="Individual criterion match results",
+    )

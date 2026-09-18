@@ -29,6 +29,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "partial_match": 0.50,
         "minimum_resume_chars": 100,
     },
+    "matching": {
+        "chunk_size": 500,
+        "chunk_overlap": 50,
+        "embedding_model": "all-MiniLM-L6-v2",
+    },
 }
 
 
@@ -75,3 +80,27 @@ def get_gemini_api_key() -> Optional[str]:
 def get_gemini_model() -> str:
     """Retrieve the Gemini model name from environment variables, defaulting to gemini-2.5-flash."""
     return os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+
+def get_matching_config(config_path: Path | str = CONFIG_PATH) -> Dict[str, Any]:
+    """Retrieve the matching configuration section."""
+    config = load_config(config_path)
+    return config.get("matching", DEFAULT_CONFIG["matching"])
+
+
+def get_chunk_size(config_path: Path | str = CONFIG_PATH) -> int:
+    """Retrieve maximum character chunk size for resume splitting."""
+    cfg = get_matching_config(config_path)
+    return int(cfg.get("chunk_size", 500))
+
+
+def get_chunk_overlap(config_path: Path | str = CONFIG_PATH) -> int:
+    """Retrieve chunk overlap in characters."""
+    cfg = get_matching_config(config_path)
+    return int(cfg.get("chunk_overlap", 50))
+
+
+def get_embedding_model_name(config_path: Path | str = CONFIG_PATH) -> str:
+    """Retrieve the sentence-transformers model name."""
+    cfg = get_matching_config(config_path)
+    return str(cfg.get("embedding_model", "all-MiniLM-L6-v2"))
