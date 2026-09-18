@@ -156,7 +156,9 @@ $$
 - **Keyword Score**: Calculated as the exact fraction of keywords found:
 
 $$
-\mathrm{keyword\_score} = \frac{\mathrm{matched\_keywords}}{\mathrm{total\_criterion\_keywords}}
+\text{Keyword Score} =
+\frac{\text{Matched Keywords}}
+{\text{Total Criterion Keywords}}
 $$
 
 ### Evidence Extraction
