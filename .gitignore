@@ -33,7 +33,7 @@ uploads/
 resumes/
 temp/
 tmp/
-*.pdf
+# *.pdf
 *.docx
 *.doc
 !samples/*.pdf
